@@ -1,0 +1,30 @@
+# Python virtual environment
+# Replace 'sb3-env' with the name of your virtual environment folder if it's different
+/sb3-env/
+/venv/
+/env/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated data and models from your scripts
+# This is the MOST IMPORTANT section for your project
+/episode_logs/
+/episode_logs_successful/
+/logs/
+*.zip
+*.json
+
+# Generated images and plots
+*.png
+*.jpg
+*.jpeg
+
+# IDE and editor configuration files
+.vscode/
+.idea/
+
+# macOS specific files
+.DS_Store
