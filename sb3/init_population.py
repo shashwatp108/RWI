@@ -9,7 +9,7 @@ Phase 2 Part 1:
 - NOTE: Plausibility checks have been REMOVED from this version.
 
 Usage:
-    python phase2_population_init.py --critical-index 0 --pop-size 120
+    python init_population.py --critical-index 0 --pop-size 100000
 """
 
 import json
@@ -167,7 +167,7 @@ def random_edit_exploratory(grid: List[List[str]], max_edits=3, forbidden_positi
                 flip_tile(new_grid, pos)
         else:
             # pick a special tile to move (Key/Door/Goal)
-            special_positions = [(x,y) for y in range(1,H-1) for x in range(1,W-1) if new_grid[y][x] in ("Key","Door","Goal")]
+            special_positions = [(x,y) for y in range(1,H-1) for x in range(1,W-1) if new_grid[y][x] in ("Key","Door")]
             if not special_positions:
                 continue # No special tiles to swap
             
@@ -208,14 +208,14 @@ def build_population_from_critical(critical_state_obj: dict, episode_record: dic
     forbidden = set()
     forbidden.add(agent_pos)
     
+    goal_pos = find_tile_positions(initial_grid, GOALS)[0]
+    forbidden.add(goal_pos)
     # In conservative mode, also protect key, door, goal, and outer walls
     if mode == 'conservative':
         key_pos = find_tile_positions(initial_grid, KEYS)[0]
         door_pos = find_tile_positions(initial_grid, DOORS)[0]
-        goal_pos = find_tile_positions(initial_grid, GOALS)[0]
         forbidden.add(key_pos)
         # forbidden.add(door_pos)
-        forbidden.add(goal_pos)
         H = len(initial_grid); W = len(initial_grid[0])
         for y in range(H):
             forbidden.add((0,y)); forbidden.add((W-1,y))

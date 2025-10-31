@@ -122,7 +122,7 @@ class EngineeredObsWrapper(gym.Wrapper):
 
 # --- 2. Define Constants ---
 ENV_NAME = "MiniGrid-DoorKey-8x8-v0"
-MODEL_FILENAME = "ppo_doorkey_8x8_mini.zip"
+MODEL_FILENAME = "ppo_doorkey_8x8.zip"
 LOGS_DIR = "logs/"
 TOTAL_TIMESTEPS = 100_000
 
@@ -206,7 +206,7 @@ def evaluate_agent():
 
 # --- Main execution block ---
 if __name__ == "__main__":
-    train_agent()
+    # train_agent()
     evaluate_agent()
     visualize_agent()
 

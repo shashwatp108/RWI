@@ -7,7 +7,7 @@ from minigrid.wrappers import FlatObsWrapper
 from stable_baselines3 import PPO
 
 # --- 1. Define Constants ---
-MODEL_FILENAME = "ppo_doorkey_6x6_mini.zip"
+MODEL_FILENAME = "ppo_doorkey_6x6_mini_2.zip"
 ENV_NAME = "MiniGrid-DoorKey-6x6-v0"
 LOG_DIR = "episode_logs" # <-- CHANGE: New folder for clarity
 N_SUCCESSFUL_EPISODES = 1000  # <-- CHANGE: Now specifies the target number of SUCCESSFUL episodes
