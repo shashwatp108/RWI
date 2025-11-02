@@ -1,5 +1,5 @@
 """
-phase2_population_init.py
+init_population.py
 
 Phase 2 Part 1:
 - Load a critical state from critical_states.json
@@ -9,7 +9,7 @@ Phase 2 Part 1:
 - NOTE: Plausibility checks have been REMOVED from this version.
 
 Usage:
-    python init_population.py --critical-index 0 --pop-size 100000
+    python init_population.py --critical-index 9 --pop-size 100000 --mode exploratory
 """
 
 import json

@@ -1,4 +1,4 @@
-# evaluate_population_plausibility.py
+# evaluate_plausibility.py
 """
 Driver script:
 - Loads population JSON and episodes
@@ -7,7 +7,7 @@ Driver script:
 - Writes annotated population and plausible population files.
 
 Usage:
-python evaluate_plausibility.py --population populations/population_crit0_pop100000.json --out-dir populations/evaluated --threshold 0.75
+python evaluate_plausibility.py --population populations/population_crit9_pop100000.json --out-dir populations/evaluated --threshold 0.75
 
 """
 import argparse

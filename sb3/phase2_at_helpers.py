@@ -1,40 +1,34 @@
 # phase2_at_helpers.py
 """
-Helpers for Action-change (A) and Trajectory-improvement (T).
+Helpers for:
+ - Action-change scoring (A)
+ - Trajectory-improvement scoring (T) using original environment path as baseline (NO A*)
 
-Functions:
- - build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name) -> env (FlatObsWrapper)
- - action_change_score(candidate, s_star_meta, model, env_name, n_samples=20, deterministic=False, threshold=0.5)
- - rollout_trajectory_improvement(candidate, s_star_meta, model, astar_fn, env_name, max_steps=200)
+Key functions:
+ - build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name, has_key, door_is_locked)
+ - sample_policy_action_probs(env, model, n_samples)
+ - action_change_score(candidate, s_star, model, n_samples, threshold_binary)
+ - rollout_policy_and_get_path_length(env, model, max_steps, deterministic)
+ - compute_path_len_from_grid(grid_codes, s_star, model, env_name, n_rollouts, max_steps, deterministic, has_key, door_is_locked)
+ - rollout_trajectory_improvement(candidate, s_star, model, path_orig_median, env_name, n_rollouts, max_steps, deterministic, has_key, door_is_locked)
 
-Notes:
- - grid_codes: 2D list of strings: "Wall","empty","Key","Door","Goal" (same as in your logs).
- - s_star_meta: the 's_star' object from critical_states (should include step, pos, dir, action, grid_snapshot)
- - astar_fn: import astar_min_steps from your find_cs.py and pass it in.
 """
-
 import gymnasium as gym
 import copy
-import numpy as np
-from minigrid.wrappers import FlatObsWrapper
 import time
-from typing import Tuple, Dict
+from typing import Dict, Tuple, List
+from minigrid.wrappers import FlatObsWrapper
 
-# Try common imports for object classes (may need adjustment depending on installed gym_minigrid)
+# Attempt to import Grid & world object classes; may need to adjust for your minigrid version.
 try:
     from minigrid.core.grid import Grid
-    from minigrid.core.world_object import Goal, Key, Door, Wall, Lava
-except ImportError:
-    print("Error: Failed to import Grid and World Objects from minigrid.core.")
-    print("Please ensure the minigrid package is installed correctly.")
+    from minigrid.core.world_object import Goal, Key, Door, Wall
+except Exception as e:
     Grid = None
-    Goal = None
-    Key = None
-    Door = None
-    Wall = None
-    Lava = None
+    Goal = Key = Door = Wall = None
+    # We'll raise helpful error later if Grid is missing when needed.
 
-# mapping from string to class for object creation — you may need to adjust constructors
+# Mapping from tile name used in your JSON -> constructor function / handler
 _TILE_TO_CLASS = {
     "Wall": Wall,
     "Key": Key,
@@ -43,26 +37,27 @@ _TILE_TO_CLASS = {
     # "empty" -> None
 }
 
-def build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name="MiniGrid-DoorKey-6x6-v0"):
+def build_env_from_grid_codes(grid_codes: List[List[str]], agent_pos: Tuple[int,int],
+                              agent_dir: int, env_name: str = "MiniGrid-DoorKey-6x6-v0",
+                              has_key: bool = False, door_is_locked: bool = True):
     """
-    Construct a gym-minigrid env whose internal grid matches grid_codes and agent position/dir.
-    Returns a FlatObsWrapper-wrapped env ready for model.predict(obs).
-    NOTE: This uses Grid.set() and object constructors — if imports fail, adapt to your version.
+    Construct a gym-minigrid env.
+    
+    ✅ NEW: Now correctly sets agent's inventory (has_key) and the
+    door's locked state (door_is_locked) based on the s_star state.
     """
     if Grid is None:
-        raise ImportError(
-            "Couldn't import Grid / object classes. Please ensure gym_minigrid or minigrid is installed, "
-            "and update import mapping in phase2_at_helpers.py."
-        )
+        raise ImportError("minigrid Grid/world objects not importable. Ensure 'minigrid' is installed and importable.")
 
     H = len(grid_codes); W = len(grid_codes[0])
+    # create environment and disable randomization by not using env.reset to generate objects
     env = gym.make(env_name)
     env = FlatObsWrapper(env)
 
-    # create empty Grid
+    # create empty Grid of correct size
     grid = Grid(W, H)
-    # fill with empty objects first (Grid uses None by default)
-    # place objects according to grid_codes
+
+    # Fill grid according to grid_codes
     for y in range(H):
         for x in range(W):
             tile = grid_codes[y][x]
@@ -71,12 +66,11 @@ def build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name="MiniGr
             cls = _TILE_TO_CLASS.get(tile)
             if cls is None:
                 continue
-            # Door / Key / Goal constructors often take different args.
-            # We attempt the simplest constructors and catch any exceptions.
             try:
                 if tile == "Door":
-                    # Door may require color parameter; fallback to default
-                    obj = Door(color='yellow', is_locked=False)
+                    # --- ✅ FIX ---
+                    # Use the door_is_locked state passed from the evaluation script
+                    obj = Door('yellow', is_locked=door_is_locked)
                 elif tile == "Key":
                     obj = Key('yellow')
                 elif tile == "Goal":
@@ -84,96 +78,117 @@ def build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name="MiniGr
                 else:
                     obj = cls()
             except Exception:
-                # Try default no-arg
                 try:
                     obj = cls()
                 except Exception as e:
                     raise RuntimeError(f"Cannot construct object for tile {tile}: {e}")
-
             grid.set(x, y, obj)
 
-    # attach the constructed grid
+    # attach constructed grid and set agent loc/dir
     env.unwrapped.grid = grid
-
-    # set agent position and dir
     env.unwrapped.agent_pos = tuple(agent_pos)
     env.unwrapped.agent_dir = int(agent_dir)
 
-    # build observation by resetting with the same configuration (no randomization)
-    # Some minigrid versions require env.reset() to build internal state; we'll reset and then override grid again
+    # --- ✅ FIX ---
+    # Correctly set the agent's inventory based on s_star
+    if has_key:
+        # We must create a Key object for the agent to be "carrying"
+        # This assumes the key is 'yellow'.
+        try:
+            env.unwrapped.carrying = Key('yellow')
+        except Exception:
+            # Fallback if Key constructor fails (should not happen if imports work)
+             env.unwrapped.carrying = "KEY_OBJECT_SENTINEL"
+    else:
+        env.unwrapped.carrying = None
+
+
+    # Ensure the env builds its internal observations correctly
     try:
+        # This reset *does* generate a new grid, but we fix it immediately after
         obs, info = env.reset()
     except Exception:
-        # older gym style
         _ = env.reset()
 
-    # ensure grid & agent pos/dir persist
+    # re-attach grid, agent pos, and inventory in case reset replaced them
     env.unwrapped.grid = grid
     env.unwrapped.agent_pos = tuple(agent_pos)
     env.unwrapped.agent_dir = int(agent_dir)
+    if has_key:
+        try:
+            env.unwrapped.carrying = Key('yellow')
+        except Exception:
+             env.unwrapped.carrying = "KEY_OBJECT_SENTINEL"
+    else:
+        env.unwrapped.carrying = None
 
     return env
 
-def sample_policy_action_probs(env, model, n_samples=20):
+def sample_policy_action_probs(env, model, n_samples=20, deterministic=False):
     """
-    Estimate action frequency distribution by sampling the (stochastic) policy n_samples times.
+    Sample the (stochastic) policy n_samples times to estimate action probabilities.
     Returns dict {action: prob}.
-    env should be ready so calling model.predict(obs) works.
+    env: FlatObsWrapper env (position/dir already set).
     """
-    obs, _ = env.reset() if True else env.reset()  # reset but preserve grid and agent_pos
-    # We must ensure obs corresponds to current state (some envs require env.reset to compute obs)
-    # To be safe, call model.predict on the SAME obs repeatedly.
+    # Do NOT call env.reset(). It regenerates the grid.
+    # Instead, manually generate the observation for the *current* state.
+    obs = env.observation(env.unwrapped.gen_obs())
+    
     counts = {}
     for _ in range(n_samples):
-        action, _ = model.predict(obs, deterministic=False)
-        a = int(action)
+        a, _ = model.predict(obs, deterministic=deterministic)
+        a = int(a)
         counts[a] = counts.get(a, 0) + 1
     probs = {a: counts[a] / n_samples for a in counts}
     return probs
 
 def action_change_score(candidate: Dict, s_star: Dict, model, env_name="MiniGrid-DoorKey-6x6-v0",
-                        n_samples=20, orig_action=None, threshold_binary=0.5) -> Dict:
+                        n_samples=20, deterministic=False, threshold_binary=0.5,
+                        has_key_at_s: bool = False, door_is_locked_at_s: bool = True) -> Dict: # ✅ NEW PARAMS
     """
-    Returns a dictionary with:
-    - p_orig_action (float)
-    - best_alt_action (int)
-    - best_alt_prob (float)
-    - a_score (float in [0,1]) = max(0, best_alt_prob - p_orig_action)
-    - a_binary (bool): whether best_alt_action != orig_action OR p_orig_action < threshold_binary
-    Also returns diagnostics and timing.
+    Estimate change in action distribution at the s* position when the environment is modified.
+    Returns diagnostics dict.
     """
     out = {"ok": False}
     start = time.time()
+
     grid_codes = candidate["grid"]
-    # s_star contains pos, dir and original action. Use orig_action param to override
-    agent_pos = s_star["pos"]
-    agent_dir = s_star.get("dir", 0)
-    if orig_action is None:
-        orig_action = s_star.get("action")
-    # Ensure it's a standard python int
-    orig_action = int(orig_action)
+    agent_pos = tuple(s_star["pos"])
+    agent_dir = int(s_star.get("dir", 0))
+    orig_action = int(s_star.get("action"))
 
     try:
-        env = build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name=env_name)
+        # --- ✅ FIX: Pass the correct states to the builder ---
+        env = build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name=env_name,
+                                        has_key=has_key_at_s, door_is_locked=door_is_locked_at_s)
     except Exception as e:
         out["error"] = f"build_env_failed: {e}"
         return out
 
-    probs = sample_policy_action_probs(env, model, n_samples=n_samples)
-    p_orig = probs.get(int(orig_action), 0.0)
-    # find best alternative action
-    best_action = max(probs.items(), key=lambda x: x[1])[0]
-    best_prob = probs[best_action]
+    try:
+        probs = sample_policy_action_probs(env, model, n_samples=n_samples, deterministic=deterministic)
+    except Exception as e:
+        out["error"] = f"policy_sampling_failed: {e}"
+        env.close()
+        return out
+
+    p_orig = probs.get(orig_action, 0.0)
+    
+    # find best alternative action (handle empty probs dict if sampling fails)
+    if not probs:
+        best_action, best_prob = orig_action, 0.0
+    else:
+        best_action, best_prob = max(probs.items(), key=lambda x: x[1])
 
     a_score = max(0.0, float(best_prob - p_orig))
-    a_binary = (best_action != int(orig_action)) or (p_orig < threshold_binary)
+    a_binary = (best_action != orig_action) or (p_orig < threshold_binary)
 
     out.update({
         "ok": True,
         "p_orig_action": float(p_orig),
         "best_alt_action": int(best_action),
         "best_alt_prob": float(best_prob),
-        "a_score": a_score,
+        "a_score": float(a_score),
         "a_binary": bool(a_binary),
         "probs": probs,
         "elapsed": time.time() - start
@@ -181,39 +196,34 @@ def action_change_score(candidate: Dict, s_star: Dict, model, env_name="MiniGrid
     env.close()
     return out
 
-# Replace existing rollout_policy_and_get_path_length and rollout_trajectory_improvement
-def rollout_policy_and_get_path_length(env, model, max_steps=200):
+def rollout_policy_and_get_path_length(env, model, max_steps=200, deterministic=False) -> Tuple[int,bool,List[Tuple[int,int]]]:
     """
     Run the environment until termination or max_steps.
     Returns:
-      - path_len (number of position transitions: len(positions)-1)
-      - success (bool)
-      - positions (list of (x,y) lists)
-    This counts tile moves (not forward-action counts) so it matches A*/path lengths.
+      - path_len: number of tile transitions (i.e., count of steps where position changed)
+      - success: bool (whether goal reached)
+      - positions: list of (x,y) positions visited
+    deterministic: whether to use deterministic model.predict
     """
-    # Reset just to ensure observation matches the env's current grid & agent_pos
-    obs, _ = env.reset()
-    # capture initial position as standard tuple/list
+    # Do NOT call env.reset(). It regenerates the grid.
+    # Instead, manually generate the observation for the *current* state.
+    obs = env.observation(env.unwrapped.gen_obs())
     pos0 = tuple(env.unwrapped.agent_pos)
+    
     positions = [ (int(pos0[0]), int(pos0[1])) ]
     success = False
 
     for t in range(max_steps):
-        action, _ = model.predict(obs, deterministic=False)
+        action, _ = model.predict(obs, deterministic=deterministic)
         action = int(action)
         obs, reward, terminated, truncated, info = env.step(action)
-
         pos_cur = tuple(env.unwrapped.agent_pos)
-        # append the current position after the action step (tile position)
-        positions.append((int(pos_cur[0]), int(pos_cur[1])))
-
+        positions.append( (int(pos_cur[0]), int(pos_cur[1])) )
         if terminated or truncated:
-            # check goal
             final_obj = env.unwrapped.grid.get(*env.unwrapped.agent_pos)
             success = final_obj is not None and getattr(final_obj, "type", "").lower() == "goal"
             break
 
-    # path length measured as number of tile transitions (unique successive moves)
     # count transitions where position actually changed
     transitions = 0
     for i in range(1, len(positions)):
@@ -222,68 +232,81 @@ def rollout_policy_and_get_path_length(env, model, max_steps=200):
 
     return transitions, success, positions
 
-
-def rollout_trajectory_improvement(candidate: Dict, s_star: Dict, model, astar_min_steps_fn,
-                                   env_name="MiniGrid-DoorKey-6x6-v0", max_steps=200):
+def compute_path_len_from_grid(grid_codes, s_star, model, env_name="MiniGrid-DoorKey-6x6-v0",
+                               n_rollouts=3, max_steps=200, deterministic=False,
+                               has_key_at_s: bool = False, door_is_locked_at_s: bool = True): # ✅ NEW PARAMS
     """
-    For candidate starting from s*, compute two-stage orig_len using get_true_optimal_path (if available),
-    then roll out the policy and compute T = (orig_len - cf_len) / orig_len where
-    cf_len is the number of tile transitions in the rollout.
+    Compute median path length (tile transitions) from s* for a given grid by performing n_rollouts
+    and returning the median transitions value and diagnostics.
+    """
+    agent_pos = tuple(s_star["pos"])
+    agent_dir = int(s_star.get("dir", 0))
+    lengths = []
+    successes = []
+    positions_list = []
+
+    for _ in range(n_rollouts):
+        # --- ✅ FIX: Pass the correct states to the builder ---
+        env = build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name=env_name,
+                                        has_key=has_key_at_s, door_is_locked=door_is_locked_at_s)
+        
+        l, succ, pos = rollout_policy_and_get_path_length(env, model, max_steps=max_steps, deterministic=deterministic)
+        env.close()
+        lengths.append(l)
+        successes.append(succ)
+        positions_list.append(pos)
+
+    # Only consider path lengths from *successful* rollouts
+    successful_lengths = [lengths[i] for i in range(len(lengths)) if successes[i]]
+
+    if not successful_lengths:
+        # If no rollouts reached the goal, the path length is effectively "infinite"
+        median_len = float('inf')
+    else:
+        # Otherwise, take the median of only the successful runs
+        lengths_sorted = sorted(successful_lengths)
+        median_len = lengths_sorted[len(lengths_sorted)//2]
+    
+    diagnostics = {"lengths": lengths, "successes": successes, "successful_lengths_considered": successful_lengths, "positions": positions_list}
+    
+    return int(median_len) if median_len != float('inf') else float('inf'), diagnostics
+
+
+def rollout_trajectory_improvement(candidate: Dict, s_star: Dict, model,
+                                   path_orig_median: int,
+                                   env_name="MiniGrid-DoorKey-6x6-v0",
+                                   n_rollouts=3, max_steps=200, deterministic=False,
+                                   has_key_at_s: bool = False, door_is_locked_at_s: bool = True): # ✅ NEW PARAMS
+    """
+    Compute T-score for candidate by rolling out the policy on candidate grid (n_rollouts -> median cf_len)
+    Compares to provided path_orig_median (computed once from original grid).
     """
     out = {"ok": False}
     start = time.time()
 
     grid_codes = candidate["grid"]
-    agent_pos = tuple(s_star["pos"])
-    agent_dir = int(s_star.get("dir", 0))
 
-    # Prefer get_true_optimal_path if it's provided in the astar module,
-    # otherwise fall back to astar_min_steps (less accurate for DoorKey).
-    orig_len = None
-    try:
-        # try to use two-stage helper (get_true_optimal_path)
-        from find_cs import get_true_optimal_path
-        orig_len, _ = get_true_optimal_path(grid_codes, agent_pos)
-    except Exception:
-        try:
-            orig_len, _ = astar_min_steps_fn(grid_codes, agent_pos, has_key_start=False)
-        except Exception as e:
-            out["error"] = f"astar_failed: {e}"
-            return out
+    # --- ✅ FIX: Pass the correct states to the compute function ---
+    cf_len_median, diag = compute_path_len_from_grid(grid_codes, s_star, model,
+                                                     env_name=env_name, n_rollouts=n_rollouts,
+                                                     max_steps=max_steps, deterministic=deterministic,
+                                                     has_key_at_s=has_key_at_s, door_is_locked_at_s=door_is_locked_at_s)
 
-    if orig_len is None or orig_len == float("inf"):
-        out["error"] = "orig_infinite"
-        return out
-
-    # Build env and run rollout
-    try:
-        env = build_env_from_grid_codes(grid_codes, agent_pos, agent_dir, env_name=env_name)
-    except Exception as e:
-        out["error"] = f"build_env_failed: {e}"
-        return out
-
-    cf_len, success, positions = rollout_policy_and_get_path_length(env, model, max_steps=max_steps)
-
-    # Compute improvement (if rollout reached shorter path)
     T = 0.0
-    try:
-        if cf_len < orig_len:
-            T = float((orig_len - cf_len) / float(orig_len))
-            T = max(0.0, min(1.0, T))
-        elif cf_len == orig_len:
-            # reaching the same optimal path is considered full improvement
-            T = 1.0
-    except Exception:
-        T = 0.0
-
+    if path_orig_median > 0 and cf_len_median < float('inf'):
+        # Only calculate T if the original path wasn't 0 AND the candidate succeeded
+        raw = (path_orig_median - cf_len_median) / float(path_orig_median)
+        if raw > 0:
+            T = float(max(0.0, min(1.0, raw)))
+        # If raw is <= 0 (no improvement), T remains 0.0
+    # If candidate failed (cf_len_median is inf), T remains 0.0
+        
     out.update({
         "ok": True,
-        "orig_remaining_len": float(orig_len),
-        "cf_path_len": float(cf_len),
-        "success": bool(success),
+        "path_orig": int(path_orig_median),
+        "cf_path_len_median": int(cf_len_median) if cf_len_median != float('inf') else -1, # Use -1 for JSON compatibility
         "T": float(T),
-        "positions": positions,
+        "t_diag": diag,
         "elapsed": time.time() - start
     })
-    env.close()
     return out

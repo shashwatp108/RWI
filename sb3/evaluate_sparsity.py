@@ -4,12 +4,12 @@ Driver for computing sparsity S-term for a population JSON.
 Automatically uses plausible_population.json if available.
 
 python evaluate_sparsity.py \
-  --population populations/population_crit0_pop100000.json \
+  --population populations/population_crit9_pop100000.json \
   --episodes-file episode_logs/episodes_full.json \
   --critical-states critical_states.json \
-  --critical-index 0 \
+  --critical-index 9 \
   --out-dir populations/evaluated_sparsity \
-  --top-k 100
+  --top-k 30
 """
 import argparse
 import os

@@ -11,7 +11,7 @@ import matplotlib.colors as mcolors
 SPARSE_POPULATION_FILE = "populations/evaluated_sparsity/plausible_population_topk_by_sparsity.json"
 
 # The original, full population file (needed to get the baseline grid for comparison)
-ORIGINAL_POPULATION_FILE = "populations/population_crit0_pop100000.json"
+ORIGINAL_POPULATION_FILE = "populations/population_crit9_pop100000.json"
 
 # Directory where the output images will be saved
 OUTPUT_DIR = "visualizations_sparsity"

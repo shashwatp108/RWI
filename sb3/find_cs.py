@@ -94,6 +94,15 @@ def astar_min_steps(grid_codes, start_pos, has_key_start=False, override_goal=No
     return float("inf"), None
 
 # --- 3. Critical State Identification Logic ---
+def find_tile_positions(grid: list, tile_set: set) -> list:
+    """Finds all (x, y) coordinates of tiles in tile_set."""
+    pos = []
+    H, W = len(grid), len(grid[0])
+    for y in range(H):
+        for x in range(W):
+            if grid[y][x] in tile_set:
+                pos.append((x,y))
+    return pos
 
 def compute_has_key_sequence(episode):
     """Determines at which step the agent acquires a key."""

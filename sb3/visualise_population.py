@@ -8,7 +8,7 @@ import matplotlib.colors as mcolors
 
 # --- 1. Configuration ---
 # Set this to the population file you generated
-POPULATION_FILE = "populations/population_crit0_pop120.json"
+POPULATION_FILE = "populations/population_crit9_pop100000.json"
 # Directory where the output images will be saved
 OUTPUT_DIR = "visualizations"
 # The size of the highlight box to draw around the agent's critical position

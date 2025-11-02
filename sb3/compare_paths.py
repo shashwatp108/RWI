@@ -9,7 +9,7 @@ from find_cs import astar_min_steps, WALLS, DOORS, KEYS, GOALS
 # --- Configuration ---
 CRITICAL_STATES_FILE = "critical_states.json"
 EPISODES_FILE = os.path.join("episode_logs", "episodes_full.json")
-CRITICAL_STATE_INDEX = 0  # Set the index of the critical state you want to see
+CRITICAL_STATE_INDEX = 11  # Set the index of the critical state you want to see
 
 # --- Visualization Code ---
 OBJECT_TO_INT = {"empty": 0, "Wall": 1, "Door": 2, "Key": 3, "Goal": 4}

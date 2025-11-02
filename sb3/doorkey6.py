@@ -8,7 +8,7 @@ from stable_baselines3.common.env_util import make_vec_env
 
 # --- 1. Define Constants ---
 ENV_NAME = "MiniGrid-DoorKey-6x6-v0"  # <-- Changed
-MODEL_FILENAME = "ppo_doorkey_6x6_mini.zip" # <-- Changed
+MODEL_FILENAME = "ppo_doorkey_6x6_mini_2.zip" # <-- Changed
 LOGS_DIR = "logs/"
 TOTAL_TIMESTEPS = 70_000 # Increased slightly for a slightly larger env
 
@@ -92,6 +92,6 @@ def evaluate_agent():
 
 # --- Main execution block ---
 if __name__ == "__main__":
-    # train_agent()
+    train_agent()
     evaluate_agent()
     visualize_agent()
